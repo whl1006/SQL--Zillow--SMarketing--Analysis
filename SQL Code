@@ -1,0 +1,230 @@
+/**Count Phone by REAgentID**/
+SELECT REAgentID, SUM(PHONECount) AS PhoneCount FROM (
+SELECT REAgentID, 
+--CONVERT(DATE, PhoneCallDateTime) AS CallDate, 
+--SUM(TalkTimeMinutes) AS TotalMinute
+COUNT(*) AS PhoneCount
+FROM PhoneCalls20161001_20170228
+WHERE REAgentID IS NOT NULL
+	AND TalkTimeMinutes > 0
+	--AND PhoneCallType like 'RE Agent Called Sales %'
+GROUP BY REAgentID
+--, PhoneCallDateTime
+UNION
+SELECT REAgentID, 
+--CONVERT(DATE, PhoneCallDateTime) AS CallDate, 
+--SUM(TalkTimeMinutes) as TotalMinute
+COUNT(*) as PhoneCount
+FROM PhoneCalls20170301_20170630
+WHERE REAgentID IS NOT NULL
+	AND TalkTimeMinutes > 0
+	--AND PhoneCallType like 'RE Agent Called Sales %'
+GROUP BY REAgentID) as a
+GROUP BY ReagentID
+
+SELECT t1.REAgentID, PhoneCount, MeetCount FROM [dbo].[PhoneCount] as t1 
+FULL OUTER JOIN (
+SELECT REAgentID, 
+COUNT(*) AS MeetCount FROM [dbo].[SalesMeetings] 
+WHERE REAgentID IS NOT NULL
+GROUP BY REAgentID) as t2
+ON t1.REAgentID = t2.REAgentID 
+
+/**Count Meet by REAgentID**/
+SELECT * INTO FullMeet FROM(
+SELECT t1.REAgentID, PhoneCount, MeetCount 
+FROM [dbo].[PhoneCount] as t1 
+FULL OUTER JOIN(
+SELECT REAgentID, 
+COUNT(*) AS MeetCount FROM [dbo].[SalesMeetings] 
+WHERE REAgentID IS NOT NULL
+GROUP BY REAgentID) as t2
+ON t1.REAgentID = t2.REAgentID)a;
+
+/**Merge Phone and Meet Count**/
+SELECT * INTO PhoneMeetCount FROM(
+	SELECT * FROM FullCall
+	UNION
+	SELECT * FROM FullMeet)a;
+
+/**Count lead count by LeadVendor and REagentID**/
+SELECT DISTINCT(CONVERT(VARCHAR, LeadVendor)) FROM AgentLeads
+WHERE LeadVendor LIKE 'email'
+--email
+SELECT * INTO ZLEmail FROM (
+SELECT ReagentID,
+COUNT(*) as EmailCount
+FROM AgentLeads
+WHERE REAgentID IS NOT NULL
+AND leadVendor like 'email'
+GROUP BY REAgentID) a
+--bing
+SELECT * INTO ZLBing FROM(
+SELECT ReagentID,
+COUNT(*) as BingCount
+FROM AgentLeads
+WHERE REAgentID IS NOT NULL
+	AND leadVendor like 'bing'
+GROUP BY REAgentID) a
+--Google
+SELECT * INTO ZLGoogle FROM(
+SELECT ReagentID,
+COUNT(*) as GoogleCount
+FROM AgentLeads
+WHERE REAgentID IS NOT NULL
+AND leadVendor like 'Google'
+GROUP BY REAgentID) a
+--Organic
+SELECT * INTO ZLOrganic FROM(
+SELECT ReagentID,
+COUNT(*) as OrganicCount
+FROM AgentLeads
+WHERE REAgentID IS NOT NULL
+AND leadVendor like 'Organic'
+GROUP BY REAgentID) a
+--social
+SELECT * INTO ZLSocial FROM(
+SELECT ReagentID,
+COUNT(*) as SocialCount
+FROM AgentLeads
+WHERE REAgentID IS NOT NULL
+AND leadVendor like 'Social'
+GROUP BY REAgentID) a
+--left join with original agentleads
+SELECT * INTO  fullAgentLeadsCount FROM(
+SELECT t4.*, s.SocialCount FROM(
+SELECT t3.*, o.OrganicCount FROM(
+SELECT  t2.*, g.GoogleCount FROM(
+SELECT t1.*, b.BingCount FROM
+(SELECT a.*, e.EmailCount FROM AgentLeads AS a
+LEFT JOIN ZLEmail e ON a.REAgentID = e.REAgentID) AS t1
+LEFT JOIN ZLBing b ON  t1.REAgentID = b.REAgentID) AS t2
+LEFT JOIN ZLGoogle g ON t2.REAgentID = g.REAgentID) AS t3
+LEFT JOIN ZLOrganic o ON t3.REAgentID = o.REAgentID) AS t4
+LEFT JOIN ZLSocial s ON t4.REAgentID = s.REAgentID) AS t5
+
+/**Select First Call Date by ReagenID**/
+--filter out no ReagentID, TALKTIME = 0
+--min date by reagentID, 
+--only outbound calls 
+SELECT a.REAgentID, '' as SalesRepID, '' as LeadPlatform, 'PhoneCall' as LeadType, 'PhoneCall' as LeadVendor, min(a.DateTime) as 'DateTime' into fullfirstcall from(
+SELECT REAgentID, 
+--min(SalesRepID) as SalesRepID, 
+--null as LeadPlatform, 'PhoneCall' as LeadType, 
+--'PhoneCall' as LeadVendor, 
+min(PhoneCallDateTime) as 'DateTime' 
+FROM PhoneCalls20161001_20170228
+WHERE REAgentID is not null
+AND TalkTimeMinutes > 0
+AND PhoneCallType LIKE '%Sales Rep Called RE Agent%'
+GROUP BY REAgentID
+UNION
+SELECT REAgentID, 
+--min(SalesRepID) as SalesRepID, 
+--null as LeadPlatform, 'PhoneCall' as LeadType, 
+--'PhoneCall' as LeadVendor, 
+min(PhoneCallDateTime) as 'DateTime' 
+FROM PhoneCalls20170301_20170630
+WHERE REAgentID is not null
+AND TalkTimeMinutes > 0
+AND PhoneCallType like '%Sales Rep Called RE Agent%'
+GROUP BY REAgentID) a
+GROUP BY REAgentID
+
+/**Select First Meeting Date by ReagentID**/
+SELECT * into fullmeeting FROM (
+SELECT REAgentID, 
+'' as SalesRepID, 
+'' as LeadPlatform,
+'Meeting' as LeadType, 
+'Meeting' as LeadVendor,
+min(SalesMeetingDate) as 'DateTime' 
+FROM SalesMeetings
+WHERE REAgentID is not null
+GROUP BY REAgentID) a
+
+SELECT * INTO fullcallmeeting FROM(
+SELECT * FROM fullfirstcall
+UNION
+SELECT * FROM fullmeeting)a;
+
+/**Match LeadVendor with LeadType for missing LeadVendor values**/
+UPDATE [dbo].[AgentLeads]
+SET LeadVendor = LeadType 
+WHERE LeadVendor IS NULL
+
+/**Group LeadVendor as 5 marketing channels**/
+UPDATE[dbo].[AgentLeads]
+SET [dbo].[AgentLeads].LeadVendor = 'Google'
+WHERE [dbo].[AgentLeads].LeadVendor like 'Google%'
+
+UPDATE [dbo].[AgentLeads]
+SET [dbo].[AgentLeads].LeadVendor = 'Organic'
+WHERE [dbo].[AgentLeads].LeadVendor LIKE 'unknown'
+
+UPDATE [dbo].[AgentLeads]
+SET [dbo].[AgentLeads].LeadVendor = 'Bing'
+WHERE [dbo].[AgentLeads].LeadVendor LIKE 'Bing%'
+
+UPDATE [dbo].[AgentLeads]
+SET [dbo].[AgentLeads].LeadVendor = 'email'
+WHERE [dbo].[AgentLeads].LeadVendor LIKE '%mail%'
+
+UPDATE [dbo].[AgentLeads]
+SET [dbo].[AgentLeads].LeadVendor = 'email'
+WHERE [dbo].[AgentLeads].LeadVendor LIKE 'Outlook'
+
+UPDATE [dbo].[AgentLeads]
+SET [dbo].[AgentLeads].LeadVendor = 'Social'
+WHERE [dbo].[AgentLeads].LeadVendor NOT LIKE 'Bing%'
+AND [dbo].[AgentLeads].LeadVendor NOT LIKE 'Google%'
+AND [dbo].[AgentLeads].LeadVendor NOT LIKE 'email%'
+AND [dbo].[AgentLeads].LeadVendor NOT LIKE 'organic%'
+AND [dbo].[AgentLeads].LeadVendor NOT LIKE 'phone%'
+AND [dbo].[AgentLeads].LeadVendor NOT LIKE 'meeting'
+
+/**Add Revenue for successful acquisitions**/
+select *, case when Vendor_Revenue like 'email' then 8000
+when Vendor_Revenue like 'Organic' then 7500
+when Vendor_Revenue is null then 0
+when Vendor_Revenue like 'Phone' then 7500
+when Vendor_Revenue like 'Meeting' then 9000
+else 7000 end as revenue
+from(
+/**Add Revenue channel and Cost channel columns**/
+select m."date" as first_touch_date,m.REAgentID,m.Vendor_Cost,m.PhoneCount, 
+ m.MeetCount,m.emailcount,m.bingcount,m.googlecount,
+ m.organiccount,m.socialcount,
+ d.ZUID,convert(date, d.AcquisitionDate) as AcquisitionDate,
+ case when Vendor_Cost like 'Organic' and d.ZUID is not null then 'Organic'
+ when Vendor_Cost like 'email' and d.ZUID is not null then 'Email'
+when Vendor_Cost like 'Phone%' and d.ZUID is not null then 'Phone'
+when Vendor_Cost like 'Meeting' and d.ZUID is not null then 'Meeting'
+when d.ZUID is null then null
+else 'Paid' end as Vendor_Revenue,
+	from(
+	/**Map ZUID with REAgentID**/
+select k.touch,k."date",k.REAgentID,k.LeadVendor as Vendor_Cost,
+k.Phonecount,k.Meetcount,k.emailcount,k.bingcount,k.googlecount,
+k.organiccount,k.socialcount,map.ZUID 
+from(
+		/**Attach Sales activity counts and filter first touch records. Filter out records that are unable to trace back vendor type**/
+select a.touch,a."date", a.REAgentID, a.LeadVendor,
+ a.emailcount,a.bingcount,a.googlecount,a.organiccount,a.socialcount,
+ c.Phonecount, c.MeetCount 
+from(
+			/**Assign touch counts and marketing channel counts for each REAgentID**/
+select  ROW_NUMBER() OVER (PARTITION BY Lead.REAgentID 
+ORDER BY Lead.LeadDateTime ASC) AS touch, convert(date,Lead.LeadDateTime) as 'date', lead.*,		ful.emailcount,ful.bingcount,ful.googlecount,ful.organiccount,
+ful.socialcount
+from  [dbo].[AgentLeads] Lead
+join  [dbo].[fullAgentLeadsCount] ful
+on ful.REAgentID = lead.REAgentID) a 
+left join [dbo].[PhoneMeetCount] c
+on a.REAgentID = c.REAgentID
+where a.touch = 1
+and Leadtype is not null) k
+	left join [dbo].[AgentIDZUIDLookup] map
+	on k.REAgentID = map.REAgentID) m
+left join [dbo].[AgentAcquisitionDates] d
+on d.ZUID = m.ZUID) z
